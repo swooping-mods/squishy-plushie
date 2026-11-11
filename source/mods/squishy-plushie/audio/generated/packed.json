@@ -1,0 +1,49 @@
+{
+  "schema": "moon-sound-assets/v1",
+  "cues": [
+    {
+      "id": "impact_soft",
+      "wav": "impact_soft.wav",
+      "samples": 36720,
+      "rate": 48000,
+      "sha256": "3bea4993e83a9d364323f9690eec6c6b16657d5841f84bfffef7105f57170444"
+    },
+    {
+      "id": "impact_hard",
+      "wav": "impact_hard.wav",
+      "samples": 44640,
+      "rate": 48000,
+      "sha256": "d40adf377d7722948e3670c37cd4b49f635d1c7eef6c236c5f14227ea532b520"
+    },
+    {
+      "id": "squeeze",
+      "wav": "squeeze.wav",
+      "samples": 43680,
+      "rate": 48000,
+      "sha256": "019549423aa1c812546a66a299682fab6e4e44a6787aac0a9b9fcc99c12dfd19"
+    },
+    {
+      "id": "pickup",
+      "wav": "pickup.wav",
+      "samples": 60000,
+      "rate": 48000,
+      "sha256": "427cfbf5591203452e388398bff5e4f5a1c83c47df012a2b620b785eb376f2ca"
+    },
+    {
+      "id": "throw",
+      "wav": "throw.wav",
+      "samples": 42720,
+      "rate": 48000,
+      "sha256": "b631c05b5ac0b4af9ed42c57521dd3c939b2b4899df95343d2bc38aa3740d00d"
+    },
+    {
+      "id": "drop",
+      "wav": "drop.wav",
+      "samples": 24960,
+      "rate": 48000,
+      "sha256": "b422124715acaf58448315c268722f6aa787e13acaed4c69a4feb2c787941e1a"
+    }
+  ],
+  "total_samples": 252720,
+  "header_sha256": "1a22278c32a2b512d330bcf5793a3c3f6fc13d84d2ccf7325b0ba1496e076715"
+}

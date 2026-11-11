@@ -1,0 +1,28 @@
+{
+  "cues": [
+    {
+      "id": "impact_soft",
+      "wav": "impact_soft.wav"
+    },
+    {
+      "id": "impact_hard",
+      "wav": "impact_hard.wav"
+    },
+    {
+      "id": "squeeze",
+      "wav": "squeeze.wav"
+    },
+    {
+      "id": "pickup",
+      "wav": "pickup.wav"
+    },
+    {
+      "id": "throw",
+      "wav": "throw.wav"
+    },
+    {
+      "id": "drop",
+      "wav": "drop.wav"
+    }
+  ]
+}

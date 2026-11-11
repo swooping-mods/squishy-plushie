@@ -1,0 +1,39 @@
+{
+  "id": "squishy-plushie",
+  "kind": "native",
+  "version": "0.2.0",
+  "feature_dependencies": [
+    "sound-framework",
+    "pickup-hands",
+    "hints-framework"
+  ],
+  "gameplay": true,
+  "display_name": "Squishy Plushie",
+  "play_help": [
+    "A free plush astronaut spawns inside the starter station.",
+    "Aim at the plush and E to pick up; E drops, left click throws, right click squeezes. These exclusive interactions consume overlapping keys.",
+    "Session-local host prototype. Generated fabric, squeeze, release and landing sounds follow the toy."
+  ],
+  "requires_apis": [
+    {
+      "api": "sound-framework.sound",
+      "abi": 1,
+      "min_size": 48
+    },
+    {
+      "api": "pickup-hands.hands",
+      "abi": 1,
+      "min_size": 32
+    },
+    {
+      "api": "hints-framework.hints",
+      "abi": 1,
+      "min_size": 24
+    },
+    {
+      "api": "sound-framework.sound-preparation",
+      "abi": 1,
+      "min_size": 16
+    }
+  ]
+}

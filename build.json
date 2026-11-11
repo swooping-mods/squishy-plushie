@@ -1,0 +1,6 @@
+{
+  "schema": "moon-independent-build-spec/v1",
+  "id": "squishy-plushie",
+  "kind": "native",
+  "entry": "mods/squishy-plushie/mod.c"
+}
