@@ -1,5 +1,7 @@
 # Squishy Plushie
 
+<img src="media/icon.png" alt="Squishy Plushie icon" width="128" height="128">
+
 A free starter-base plush: pick up, throw, bounce and squeeze.
 
 ## Install
