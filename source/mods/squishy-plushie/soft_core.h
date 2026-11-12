@@ -26,6 +26,9 @@ static inline int qp_impact(QPSoft *s,QPVector axis,float impulse){
 }
 static inline void qp_tick(QPSoft *s,float dt){
     if(!s||!qp_valid(dt)||dt<=0||dt>.25f)return;
+    /* Exact rest has no integration work. Keep cooling events on the original
+     * substep clock so a settled spring never accepts an impact early. */
+    if(s->compression==0&&s->speed==0&&s->cooldown==0)return;
     while(dt>0){float h=dt>1.f/240?1.f/240:dt;dt-=h;
         s->speed+=(-155*s->compression-12*s->speed)*h;s->compression+=s->speed*h;
         if(s->compression>.30f){s->compression=.30f;if(s->speed>0)s->speed=0;}

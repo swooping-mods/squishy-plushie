@@ -12,6 +12,7 @@
 #undef mh_connect
 #include "soft_core.h"
 #include "mesh_runtime.h"
+#include "visual_candidate.h"
 #include "../sound-framework/sdk/preparation_client.h"
 #include "collision.h"
 #include "carry_core.h"
@@ -36,6 +37,7 @@ static PTR rb_rotation,gameobject_layer;
 static SURoot world,root,tr,body,collider,physics_material,mesh,vertices,normals,material,texture;
 static QPSoft soft;
 static SPVec3 last_velocity,last_position,moon_center;
+static SPVec3 emitter_position;static int emitter_position_valid;
 static float squeeze_timer;static int held,approaching,frames,failed,started,host_world,test_tools,test_staged;
 static DWORD unity_thread;static int mesh_checked,impact_mesh_pending;
 static short (*key_state)(int);static PTR (*foreground)(void);static DWORD (*window_pid)(PTR,DWORD *);
@@ -101,8 +103,11 @@ static void end_world(void){
     if(hands&&carry_walker)hands->release("squishy-plushie",su_get(carry_walker));su_drop(&carry_walker);
     if(audio)audio->stop(0x51504c555348ULL);
     su_destroy(su_get(root));su_destroy(su_get(mesh));su_destroy(su_get(material));su_destroy(su_get(texture));su_destroy(su_get(physics_material));
+#if QP_IMMUTABLE_VISUAL_CANDIDATE
+    qp_visual_reset();
+#endif
     SURoot *roots[]={&world,&root,&tr,&body,&collider,&physics_material,&mesh,&vertices,&normals,&material,&texture};for(unsigned i=0;i<sizeof(roots)/sizeof(*roots);i++)su_drop(roots[i]);
-    su_zero(&soft,sizeof(soft));held=approaching=frames=host_world=test_staged=mesh_checked=impact_mesh_pending=0;squeeze_timer=0;audio_warm_step=0;published_mesh.valid=0;event("world-reset");
+    su_zero(&soft,sizeof(soft));held=approaching=frames=host_world=test_staged=mesh_checked=impact_mesh_pending=0;squeeze_timer=0;audio_warm_step=0;published_mesh.valid=0;emitter_position_valid=0;event("world-reset");
 }
 static int anchor(SPVec3 *out,SPVec3 *forward,SPVec3 *up){
     int ok=1;PTR list=call(stations,su_get(world),0,&ok);if(!ok||!list)return 0;int count=integer(get_method(object_class(list),"get_Count",0),list,&ok);if(!ok||count<1||count>16)return 0;
@@ -118,12 +123,19 @@ static int anchor(SPVec3 *out,SPVec3 *forward,SPVec3 *up){
 static int make(SPVec3 p,SPVec3 forward,SPVec3 up){
     int ok=1;PTR go=su_gameobject("Squishy plush astronaut",0);root=su_hold(go);tr=su_hold(su_transform(go));su_set_vector(su.tr_position,su_get(tr),p);su_set_quat(su.tr_rotation,su_get(tr),su_rotation(forward,up));
     PTR m=su_new("UnityEngine","Mesh");mesh=su_hold(m);call(su.mesh_ctor,m,0,&ok);
+#if !QP_IMMUTABLE_VISUAL_CANDIDATE
     PTR dynamic=su_method("UnityEngine","Mesh","MarkDynamic","");if(dynamic){call(dynamic,m,0,&ok);event("mesh-dynamic-prepared");}
+#endif
     vertices=su_hold(su_array(su.vector_class,QP_VERTICES,qp_positions,12));normals=su_hold(su_array(su.vector_class,QP_VERTICES,qp_normals,12));
     if(!vertices||!normals)return 0;
     void *va[]={su_get(vertices)},*na[]={su_get(normals)};call(su.mesh_vertices,m,va,&ok);call(su.mesh_normals,m,na,&ok);su_int(su.mesh_subcount,m,1);
     PTR uv=su_array(su.uv_class,QP_VERTICES,qp_uv,8),indices=su_array(su.int_class,QP_INDICES,qp_indices,4);void *ua[]={uv};call(su.mesh_uv,m,ua,&ok);int index=0;unsigned char bounds=1;void *ia[]={indices,&index,&bounds};call(su.mesh_indices,m,ia,&ok);
-    PTR filter=su_add_component(go,"MeshFilter"),renderer=su_add_component(go,"MeshRenderer");void *ma[]={m};call(su.meshfilter_set,filter,ma,&ok);
+    PTR visual=go;
+#if QP_IMMUTABLE_VISUAL_CANDIDATE
+    visual=qp_visual_make(su_get(tr));if(!visual||!qp_visual_publish(&soft))return 0;
+    event("immutable-visual-candidate-unqualified");
+#endif
+    PTR filter=su_add_component(visual,"MeshFilter"),renderer=su_add_component(visual,"MeshRenderer");void *ma[]={m};call(su.meshfilter_set,filter,ma,&ok);
     void *shader_args[]={su.string("Universal Render Pipeline/Lit")};PTR shader=call(su.shader_find,0,shader_args,&ok);if(!shader){void *alt[]={su.string("Universal Render Pipeline/Simple Lit")};shader=call(su.shader_find,0,alt,&ok);}if(!shader)return 0;
     PTR mat=su_new("UnityEngine","Material");material=su_hold(mat);void *mc[]={shader};call(su.material_ctor,mat,mc,&ok);float rough=.1f,metal=0;void *r[]={su.string("_Smoothness"),&rough},*me[]={su.string("_Metallic"),&metal};call(su.material_float,mat,r,&ok);call(su.material_float,mat,me,&ok);
     SUColor white={1,1,1,1};void *c[]={su.string("_BaseColor"),&white};call(set_color,mat,c,&ok);
@@ -190,8 +202,19 @@ static int release(PTR camera,int throwing){
     hands->release("squishy-plushie",su_get(carry_walker));su_drop(&carry_walker);sound_event(throwing?"throw":"drop");return 1;
 }
 static void deform(float dt){
-    U64 begin=qp_clock();qp_tick(&soft,dt);
+    U64 begin=qp_clock();
+    if(test_tools&&(soft.compression!=0||soft.speed!=0||soft.cooldown!=0))qp_profile_current.spring_ticks++;
+    qp_tick(&soft,dt);
     int changed=qp_mesh_changed(&published_mesh,&soft);
+#if QP_IMMUTABLE_VISUAL_CANDIDATE
+    /* No mutable mesh/normal arrays, uploads or bounds scans on this branch.
+     * Legacy native-mesh receipts cannot qualify a transformed renderer. */
+    if(changed){
+        if(qp_visual_publish(&soft)){qp_mesh_commit(&published_mesh,&soft);qp_profile_current.visual_updates++;}
+        else {failed=1;event("visual-affine-failed");}
+    }
+    impact_mesh_pending=0;qp_profile_current.deform+=qp_clock()-begin;return;
+#else
     int readback=test_tools&&(!mesh_checked||impact_mesh_pending)&&qp_abs(soft.compression)>.08f;
     if(!changed&&!readback){impact_mesh_pending=0;qp_profile_current.deform+=qp_clock()-begin;return;}
     QPVector *p=su.array_address(su_get(vertices),12,0),*n=su.array_address(su_get(normals),12,0);int ok=1;
@@ -216,6 +239,7 @@ static void deform(float dt){
         }
     }
     impact_mesh_pending=0;qp_profile_current.deform+=qp_clock()-begin;
+#endif
 }
 static void test_view(PTR walker,PTR camera){
     if(!test_tools)return;
@@ -279,7 +303,16 @@ static void tick_frame(PTR walker){
     }
     pickup_hint(walker,camera,allow);
     if(squeeze_timer>0)squeeze_timer-=dt;deform(dt);if(test_tools&&frames%3==0)sample();
-    if(audio){SPVec3 p=su_vector(rb_position,su_get(body));float position[]={p.x,p.y,p.z};audio->move(0x51504c555348ULL,position);}
+    if(audio){
+        /* Physics/follow already sampled or committed this exact position.
+         * A newly played voice receives its current position in sound_event. */
+        SPVec3 p=last_position;
+        if(!emitter_position_valid||p.x!=emitter_position.x||p.y!=emitter_position.y||p.z!=emitter_position.z){
+            float position[]={p.x,p.y,p.z};audio->move(0x51504c555348ULL,position);
+            qp_profile_current.emitter_moves++;
+            emitter_position=p;emitter_position_valid=1;
+        }
+    }
 }
 static void tick(PTR walker){
     if(!test_tools){tick_frame(walker);return;}
