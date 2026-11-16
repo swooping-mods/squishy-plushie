@@ -1,19 +1,12 @@
 # Squishy Plushie: behavior and implementation
 
-Describes the retained payload **0.2.0**. The behavior prose describes the retained payload; current candidate source and metadata are identified below. Gameplay qualification is a separate requirement.
-
-
-<!-- source-only-sync -->
-## Current source candidate
-
-Source version **0.2.0** is saved from workshop revision `ca32bbf79ce0840d5166a232bdb3a9fdcd761254`. The retained installable payload remains **0.2.0** with its original bytes. This source update does not rebuild or requalify that payload. The current source and metadata define the candidate; gameplay, rendered behavior and co-op remain unqualified for rebuilt bytes.
-
-The authored behavior and lifecycle descriptions below are retained from the published payload. They are not new qualification evidence for the source candidate. The integration table below follows the current candidate metadata.
-<!-- /source-only-sync -->
+Describes the exported implementation **0.2.1**. The source hashes and packaged module identify this version; verification remains scoped to the checks below.
 
 ## Behavior
 
 Spawns a free plush astronaut in the starter station. Aim and E picks it up, E drops, left click throws and right click squeezes. Pickup first validates ray/clearance and acquires Pickup Hands before moving the toy; failed admission leaves it in place. Exclusive interaction delivery consumes overlapping keys. Soft deformation, bounce/carry presentation and spatial fabric/squeeze/release/landing sounds follow the toy.
+
+The visual renderer keeps original vertices and normals immutable. Three child transforms encode the signed contact basis, volume-preserving scale and inverse basis; the physical root/capsule stay rigid. The CPU renderer remains an explicit authoring comparison. The URP material uses the resulting position and inverse-transpose normal matrices.
 
 ## State and lifecycle
 
@@ -43,6 +36,8 @@ The [module metadata](../source/mods/squishy-plushie/mod.json) owns the version 
 
 ## Verification boundary
 
-Visual softness is a bounded presentation model, not a general soft-body solver. Throw/bounce, blocked carry/drop, sound and multiplayer require separate game qualification; reloading does not preserve the session toy.
+Use immutable visual transforms for directional squish and rebound, preserving the original CPU spring and rigid capsule. Avoid active mesh/normal uploads and settled spring/visual work. Checked through actual Unity pickup, squeeze, held movement, throwing and matched rendered poses. Native Windows gameplay, other mod combinations, long sessions and real co-op remain separate.
+
+Visual softness is a bounded presentation model. Direction/speed response, spring parity, actual pickup/squeeze/held-turn/throw and matched scene captures pass. This does not qualify arbitrary lighting, native Windows gameplay, long-session resources or real multiplayer; reloading does not preserve the session toy.
 
 `python3 build.py --check` verifies the exported source hashes. It does not execute the mod or qualify the behaviors above. Installation and independent build prerequisites are in the [README](../README.md).

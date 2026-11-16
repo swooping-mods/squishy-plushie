@@ -1,12 +1,12 @@
 # Squishy Plushie
 
-A free starter-base plush: pick up, throw, bounce and squeeze.
+A free starter-base plush: pick up, throw, bounce and squeeze. Its immutable visual renderer preserves directional compression and rebound without rewriting mesh vertices each frame.
 
 ## Install
 
 Install [Moon Sweepers Mod Loader](https://github.com/swooping-mods/moon-sweepers-mod-loader) first.
 
-Download [squishy-plushie-0.2.0.msmod](content/squishy-plushie-0.2.0.msmod), import it with **Install mod package**, then select the mod and its required frameworks.
+Download [squishy-plushie-0.2.1.msmod](content/squishy-plushie-0.2.1.msmod), import it with **Install mod package**, then select the mod and its required frameworks.
 
 Required mods: [sound-framework](https://github.com/swooping-mods/sound-framework), [pickup-hands](https://github.com/swooping-mods/pickup-hands), [hints-framework](https://github.com/swooping-mods/hints-framework).
 
@@ -18,7 +18,7 @@ Required mods: [sound-framework](https://github.com/swooping-mods/sound-framewor
 
 ## Compatibility
 
-Version 0.2.0. Targets the pinned Steam Windows x64 IL2CPP build of Moon Sweepers (Steam app 5335510). On Linux, the game runs through Proton. Experimental: back up saves before using save-affecting mods.
+Version 0.2.1. Targets the pinned Steam Windows x64 IL2CPP build of Moon Sweepers (Steam app 5335510). On Linux, the game runs through Proton. Experimental: back up saves before using save-affecting mods.
 
 ## Build
 

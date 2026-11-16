@@ -1,6 +1,7 @@
 /* Test-only bounded attribution. Buffer clocks in memory: disk flushes must
  * not become part of the collision/deformation path being measured. */
-typedef struct {U64 total,deform,sound;unsigned held,impact,uploads,readback,compression_ppm,settled,spring_ticks,emitter_moves,visual_updates;} QPProfileRow;
+typedef struct {U64 total,deform,sound;unsigned held,impact,uploads,readback,compression_ppm,settled,spring_ticks,emitter_moves,visual_updates,lab_phase,lab_step,rebound;} QPProfileRow;
+static int qp_lab_enabled;static unsigned qp_lab_step;
 static QPProfileRow qp_profile_rows[8192],qp_profile_current;
 static unsigned qp_profile_count;
 static U64 qp_profile_frequency;
@@ -15,7 +16,7 @@ static void qp_profile_bind(void){
 static void qp_profile_dump(void){
     if(!qp_counter||!qp_profile_count)return;
     for(unsigned i=0;i<qp_profile_count;i++){
-        QPProfileRow *r=&qp_profile_rows[i];char b[512],*p=cat(b,"{\"event\":\"plush-profile\",\"total_us\":");
+        QPProfileRow *r=&qp_profile_rows[i];char b[768],*p=cat(b,"{\"event\":\"plush-profile\",\"total_us\":");
         p=num(p,r->total*1000000/qp_profile_frequency);p=cat(p,",\"deform_us\":");p=num(p,r->deform*1000000/qp_profile_frequency);
         p=cat(p,",\"sound_us\":");p=num(p,r->sound*1000000/qp_profile_frequency);p=cat(p,",\"held\":");p=num(p,r->held);
         p=cat(p,",\"impact\":");p=num(p,r->impact);p=cat(p,",\"uploads\":");p=num(p,r->uploads);
@@ -24,6 +25,11 @@ static void qp_profile_dump(void){
         p=cat(p,",\"spring_ticks\":");p=num(p,r->spring_ticks);
         p=cat(p,",\"emitter_moves\":");p=num(p,r->emitter_moves);
         p=cat(p,",\"visual_updates\":");p=num(p,r->visual_updates);
+        p=cat(p,",\"lab_phase\":");p=num(p,r->lab_phase);p=cat(p,",\"lab_step\":");p=num(p,r->lab_step);
+        p=cat(p,",\"rebound\":");p=num(p,r->rebound);
+        p=cat(p,",\"deform_ns\":");p=num(p,r->deform*1000000000/qp_profile_frequency);
+        p=cat(p,",\"total_ns\":");p=num(p,r->total*1000000000/qp_profile_frequency);
+        p=cat(p,",\"clock_hz\":");p=num(p,qp_profile_frequency);
         p=cat(p,"}\n");DWORD n=0;WriteFile(log_file,b,(DWORD)(p-b),&n,0);
     }
     FlushFileBuffers(log_file);qp_profile_count=0;

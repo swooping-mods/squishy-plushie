@@ -34,12 +34,14 @@ static PTR rb_get,rb_set,rb_position,rb_set_position,rb_spin,rb_kinematic,rb_gra
 static PTR collider_material,mat_ctor,mat_bounce,mat_friction,mat_static,mat_combine;
 static PTR cap_radius,cap_height,cap_direction,hit_collider,component_transform,texture_ctor,image_load,material_texture,set_color;
 static PTR rb_rotation,gameobject_layer;
-static SURoot world,root,tr,body,collider,physics_material,mesh,vertices,normals,material,texture;
+static SURoot world,root,tr,body,collider,physics_material,mesh,vertices,normals,material,texture,visual_renderer;
 static QPSoft soft;
 static SPVec3 last_velocity,last_position,moon_center;
 static SPVec3 emitter_position;static int emitter_position_valid;
 static float squeeze_timer;static int held,approaching,frames,failed,started,host_world,test_tools,test_staged;
 static DWORD unity_thread;static int mesh_checked,impact_mesh_pending;
+static int qp_throw_enabled;static void qp_throw_reset(void);
+static int qp_render_check,qp_render_pose;static SPVec3 qp_render_position;static SUQuat qp_render_rotation;
 static short (*key_state)(int);static PTR (*foreground)(void);static DWORD (*window_pid)(PTR,DWORD *);
 static void event(const char *name){if(!log_file)return;char b[256],*p=cat(b,"{\"event\":\"");p=cat(p,name);p=cat(p,"\",\"mod\":\"squishy-plushie\"}\n");DWORD n=0;WriteFile(log_file,b,(DWORD)(p-b),&n,0);}
 #include "bindings.h"
@@ -50,17 +52,19 @@ static QPVector qv(SPVec3 v){return (QPVector){v.x,v.y,v.z};}
 static SPVec3 rotate(SUQuat q,SPVec3 v){SPVec3 u=su_v(q.x,q.y,q.z),t=su_mul(su_cross(u,v),2);return su_add(v,su_add(su_mul(t,q.w),su_cross(u,t)));}
 static SUQuat rotation(PTR transform){SUQuat q={0,0,0,1};int ok=1;PTR b=call(su.tr_get_rotation,transform,0,&ok);if(ok&&b)su_copy(&q,unbox(b),sizeof(q));return q;}
 static SPVec3 local_axis(SPVec3 axis){SUQuat q=rotation(su_get(tr));q.x=-q.x;q.y=-q.y;q.z=-q.z;return rotate(q,axis);}
-static int key_e,key_f9,button_left,button_right;
+#include "visual_readback.h"
+static int key_e,key_f9,key_f10,button_left,button_right;
 static unsigned qp_interactions[3];
 static void input_edges(PTR walker){
     /* Sample before the existing context gate so typing/focus changes consume
      * held edges. Pickup/throw/squeeze eligibility remains in the toy. */
     key_e=moon_interaction_take(qp_interactions[0],walker);
     key_f9=moon_input_action("squishy-plushie.test-view","F9",1).pressed;
+    key_f10=qp_render_check&&moon_input_action("squishy-plushie.test-render-pose","F10",1).pressed;
     button_left=moon_interaction_take(qp_interactions[1],walker);
     button_right=moon_interaction_take(qp_interactions[2],walker);
 }
-static int pressed(int key){return key==101?key_e:key==290?key_f9:0;}
+static int pressed(int key){return key==101?key_e:key==290?key_f9:key==291?key_f10:0;}
 static int mouse(int button){return button==0?button_left:button_right;}
 static int ray(SPVec3 p,SPVec3 direction,float distance,unsigned char *hit){int ok=1,mask=~(1<<2),trigger=1;void *a[]={&p,&direction,hit,&distance,&mask,&trigger};PTR r=call(su.physics_ray,0,a,&ok);return ok&&r&&*(unsigned char *)unbox(r);}
 static int clear_axis(SPVec3 p,SPVec3 up,float radius){int ok=1,mask=~(1<<2),trigger=1;float half=QP_COLLIDER_HEIGHT*.5f-QP_COLLIDER_RADIUS;SPVec3 a=su_add(p,su_mul(up,half)),b=su_sub(p,su_mul(up,half));void *args[]={&a,&b,&radius,&mask,&trigger};PTR r=call(su.physics_capsule,0,args,&ok);return ok&&r&&!*(unsigned char *)unbox(r);}
@@ -98,6 +102,7 @@ static void sound_event(const char *name){
     qp_profile_current.sound+=qp_clock()-begin;
 }
 static void end_world(void){
+    qp_throw_reset();
     qp_profile_dump();
     if(hints)hints->clear("squishy-plushie");hint_state=0;
     if(hands&&carry_walker)hands->release("squishy-plushie",su_get(carry_walker));su_drop(&carry_walker);
@@ -106,8 +111,8 @@ static void end_world(void){
 #if QP_IMMUTABLE_VISUAL_CANDIDATE
     qp_visual_reset();
 #endif
-    SURoot *roots[]={&world,&root,&tr,&body,&collider,&physics_material,&mesh,&vertices,&normals,&material,&texture};for(unsigned i=0;i<sizeof(roots)/sizeof(*roots);i++)su_drop(roots[i]);
-    su_zero(&soft,sizeof(soft));held=approaching=frames=host_world=test_staged=mesh_checked=impact_mesh_pending=0;squeeze_timer=0;audio_warm_step=0;published_mesh.valid=0;emitter_position_valid=0;event("world-reset");
+    SURoot *roots[]={&world,&root,&tr,&body,&collider,&physics_material,&mesh,&vertices,&normals,&material,&texture,&visual_renderer};for(unsigned i=0;i<sizeof(roots)/sizeof(*roots);i++)su_drop(roots[i]);
+    su_zero(&soft,sizeof(soft));held=approaching=frames=host_world=test_staged=mesh_checked=impact_mesh_pending=qp_render_pose=0;squeeze_timer=0;audio_warm_step=0;published_mesh.valid=0;emitter_position_valid=0;qp_lab_step=0;event("world-reset");
 }
 static int anchor(SPVec3 *out,SPVec3 *forward,SPVec3 *up){
     int ok=1;PTR list=call(stations,su_get(world),0,&ok);if(!ok||!list)return 0;int count=integer(get_method(object_class(list),"get_Count",0),list,&ok);if(!ok||count<1||count>16)return 0;
@@ -122,6 +127,7 @@ static int anchor(SPVec3 *out,SPVec3 *forward,SPVec3 *up){
 }
 static int make(SPVec3 p,SPVec3 forward,SPVec3 up){
     int ok=1;PTR go=su_gameobject("Squishy plush astronaut",0);root=su_hold(go);tr=su_hold(su_transform(go));su_set_vector(su.tr_position,su_get(tr),p);su_set_quat(su.tr_rotation,su_get(tr),su_rotation(forward,up));
+    qp_render_position=p;qp_render_rotation=su_rotation(forward,up);
     PTR m=su_new("UnityEngine","Mesh");mesh=su_hold(m);call(su.mesh_ctor,m,0,&ok);
 #if !QP_IMMUTABLE_VISUAL_CANDIDATE
     PTR dynamic=su_method("UnityEngine","Mesh","MarkDynamic","");if(dynamic){call(dynamic,m,0,&ok);event("mesh-dynamic-prepared");}
@@ -133,9 +139,12 @@ static int make(SPVec3 p,SPVec3 forward,SPVec3 up){
     PTR visual=go;
 #if QP_IMMUTABLE_VISUAL_CANDIDATE
     visual=qp_visual_make(su_get(tr));if(!visual||!qp_visual_publish(&soft))return 0;
-    event("immutable-visual-candidate-unqualified");
+    event("visual-mode-affine");
+#else
+    event("visual-mode-mesh");
 #endif
     PTR filter=su_add_component(visual,"MeshFilter"),renderer=su_add_component(visual,"MeshRenderer");void *ma[]={m};call(su.meshfilter_set,filter,ma,&ok);
+    visual_renderer=su_hold(renderer);if(!visual_renderer)return 0;
     void *shader_args[]={su.string("Universal Render Pipeline/Lit")};PTR shader=call(su.shader_find,0,shader_args,&ok);if(!shader){void *alt[]={su.string("Universal Render Pipeline/Simple Lit")};shader=call(su.shader_find,0,alt,&ok);}if(!shader)return 0;
     PTR mat=su_new("UnityEngine","Material");material=su_hold(mat);void *mc[]={shader};call(su.material_ctor,mat,mc,&ok);float rough=.1f,metal=0;void *r[]={su.string("_Smoothness"),&rough},*me[]={su.string("_Metallic"),&metal};call(su.material_float,mat,r,&ok);call(su.material_float,mat,me,&ok);
     SUColor white={1,1,1,1};void *c[]={su.string("_BaseColor"),&white};call(set_color,mat,c,&ok);
@@ -154,6 +163,7 @@ static int make(SPVec3 p,SPVec3 forward,SPVec3 up){
     PTR pm=su_new("UnityEngine","PhysicsMaterial");if(!pm)pm=su_new("UnityEngine","PhysicMaterial");physics_material=su_hold(pm);void *pmc[]={su.string("Soft plush bounce")};call(mat_ctor,pm,pmc,&ok);su_float(mat_bounce,pm,.63f);su_float(mat_friction,pm,.45f);su_float(mat_static,pm,.5f);su_int(mat_combine,pm,3);void *cm[]={pm};call(collider_material,col,cm,&ok);
     PTR rb=su_add_component(go,"Rigidbody");body=su_hold(rb);su_float(rb_mass,rb,.35f);su_float(rb_drag,rb,.12f);su_bool(rb_gravity,rb,0);su_int(rb_ccd,rb,2);su_set_vector(rb_set,rb,su_v(0,0,0));last_velocity=su_v(0,0,0);last_position=p;soft.axis=(QPVector){0,1,0};
     if(ok)qp_mesh_commit(&published_mesh,&soft);
+    if(ok&&test_tools){qp_profile_current.readback=1;ok=qp_visual_readback();event(ok?"native-visual-rest-verified":"native-visual-rest-failed");}
     event(ok?"plush-spawned":"plush-create-failed");return ok&&root&&body&&mesh&&collider;
 }
 static int hold_point(PTR camera,SPVec3 *point,SPVec3 *forward,SPVec3 *up){PTR t=call(component_transform,camera,0,&(int){1});*forward=su_vector(su.tr_forward,t);*up=su_vector(su.tr_up,t);SPVec3 eye=su_vector(su.tr_get_position,t);*point=su_add(eye,su_add(su_mul(*forward,1.10f),su_mul(*up,-.15f)));return clear(*point);}
@@ -205,6 +215,9 @@ static void deform(float dt){
     U64 begin=qp_clock();
     if(test_tools&&(soft.compression!=0||soft.speed!=0||soft.cooldown!=0))qp_profile_current.spring_ticks++;
     qp_tick(&soft,dt);
+    /* Explicit private stills hold matched poses long enough to inspect actual
+     * URP lighting/shadows. Natural interactions run with pose zero. */
+    if(qp_render_check&&qp_render_pose){soft.compression=qp_render_pose==1?.25f:qp_render_pose==2?-.06f:0;soft.speed=soft.cooldown=0;soft.axis=(QPVector){.36f,.48f,.8f};}
     int changed=qp_mesh_changed(&published_mesh,&soft);
 #if QP_IMMUTABLE_VISUAL_CANDIDATE
     /* No mutable mesh/normal arrays, uploads or bounds scans on this branch.
@@ -212,6 +225,16 @@ static void deform(float dt){
     if(changed){
         if(qp_visual_publish(&soft)){qp_mesh_commit(&published_mesh,&soft);qp_profile_current.visual_updates++;}
         else {failed=1;event("visual-affine-failed");}
+    }
+    if(test_tools&&(!mesh_checked||impact_mesh_pending)&&qp_abs(soft.compression)>.08f){
+        qp_profile_current.readback=1;
+        if(qp_visual_readback()){mesh_checked=1;event(impact_mesh_pending?"native-affine-impact-verified":"native-affine-squish-verified");}
+        else {failed=1;event("native-affine-readback-failed");}
+    }
+    if(test_tools&&changed&&soft.compression==0){
+        qp_profile_current.readback=1;
+        if(qp_visual_readback())event("native-affine-restored-verified");
+        else {failed=1;event("native-affine-restored-failed");}
     }
     impact_mesh_pending=0;qp_profile_current.deform+=qp_clock()-begin;return;
 #else
@@ -241,8 +264,30 @@ static void deform(float dt){
     impact_mesh_pending=0;qp_profile_current.deform+=qp_clock()-begin;
 #endif
 }
+/* The private throw lab uses this same production collision admission and
+ * lunar gravity path. It sets launch velocity, never a collision impulse. */
+static float free_physics(float dt,SPVec3 *observed_dv){
+    SPVec3 p=su_vector(rb_position,su_get(body)),v=su_vector(rb_get,su_get(body)),dv=su_sub(v,last_velocity);float impact=su_sqrt(su_dot(dv,dv)),accepted=0;
+    if(observed_dv)*observed_dv=dv;
+    if(impact>.30f&&qp_impact(&soft,qv(local_axis(su_normal(dv))),impact)){
+        accepted=impact;impact_mesh_pending=impact>2.4f;sound_event(impact>2.4f?"impact-hard":"impact-soft");
+    }
+    SPVec3 up=su_normal(su_sub(p,moon_center));v=su_add(v,su_mul(up,-1.62f*dt));float speed=su_sqrt(su_dot(v,v));if(speed>18)v=su_mul(v,18/speed);su_set_vector(rb_set,su_get(body),v);last_velocity=v;last_position=p;
+    return accepted;
+}
+#include "throw_lab.h"
 static void test_view(PTR walker,PTR camera){
     if(!test_tools)return;
+    if(qp_render_check&&pressed(291)){
+        qp_render_pose=(qp_render_pose+1)%4;mesh_checked=0;
+        if(!held){
+            su_int(rb_ccd,su_get(body),0);su_set_vector(rb_set,su_get(body),su_v(0,0,0));su_set_vector(rb_spin,su_get(body),su_v(0,0,0));su_bool(rb_kinematic,su_get(body),qp_render_pose!=0);
+            su_set_vector(rb_set_position,su_get(body),qp_render_position);su_set_quat(rb_rotation,su_get(body),qp_render_rotation);
+            su_set_vector(su.tr_position,su_get(tr),qp_render_position);su_set_quat(su.tr_rotation,su_get(tr),qp_render_rotation);last_position=qp_render_position;last_velocity=su_v(0,0,0);
+            if(!qp_render_pose)su_int(rb_ccd,su_get(body),2);
+        }
+        event(qp_render_pose==1?"render-pose-compressed":qp_render_pose==2?"render-pose-rebound":qp_render_pose==3?"render-pose-rest":"render-pose-natural");
+    }
     SPVec3 target=su_vector(rb_position,su_get(body)),up=su_normal(su_sub(target,moon_center));int ok=1;
     if(held&&pressed(290)){
         /* Private replay turns through the game's own placement method. Wine's
@@ -274,6 +319,26 @@ static void test_view(PTR walker,PTR camera){
         if(ok&&angle){float pitch=*(float *)unbox(angle)*57.2957795f;SPVec3 pos=su_vector(su.tr_get_position,walker_tr),forward=su_normal(flat);void *place[]={&pos,&forward,&pitch};call(su_method("MoonCleaners","MoonWalker","Place","UnityEngine.Vector3;UnityEngine.Vector3;System.Single"),walker,place,&ok);}
     }
 }
+static void visual_profile_lab(void){
+    /* Explicit private measurement of spring + Unity visual submission only.
+     * Freeze the rigidbody once, keep hints/input/audio outside this region,
+     * and use one identical 120 Hz spring step per engine callback. Deferred
+     * engine transform propagation and GPU duration are not these QPC times. */
+    if(qp_lab_step>=2040)return;
+    qp_profile_current.lab_step=qp_lab_step;
+    qp_profile_current.lab_phase=qp_lab_step<120?0:qp_lab_step<840?1:qp_lab_step<1320?2:3;
+    if(!qp_lab_step){
+        qp_profile_current.readback=1;su_set_vector(rb_set,su_get(body),su_v(0,0,0));
+        su_set_vector(rb_spin,su_get(body),su_v(0,0,0));su_int(rb_ccd,su_get(body),0);su_bool(rb_kinematic,su_get(body),1);
+        su_zero(&soft,sizeof(soft));soft.axis=(QPVector){.36f,.48f,.8f};event("visual-profile-started");
+    }
+    if(qp_lab_step>=120&&qp_lab_step<840&&(qp_lab_step-120)%90==0){
+        if(qp_lab_step==120){qp_hit(&soft,soft.axis,3.5f);mesh_checked=0;}
+        else {qp_impact(&soft,soft.axis,8);impact_mesh_pending=1;qp_profile_current.impact=1;}
+    }
+    deform(1.f/120);qp_profile_current.rebound=soft.compression<0;
+    if(++qp_lab_step==2040){qp_profile_current.readback=1;qp_profile_dump();event(failed?"visual-profile-failed":"visual-profile-complete");}
+}
 static void tick_frame(PTR walker){
     if(!unity_thread){unity_thread=GetCurrentThreadId();event("main-thread");}if(unity_thread!=GetCurrentThreadId())return;
     PTR w=0;field_value(walker,world_field,&w);if(world&&(!su_alive(su_get(world))||w!=su_get(world))){end_world();failed=0;}
@@ -289,16 +354,19 @@ static void tick_frame(PTR walker){
     }
     if(!root){if(frames<120||frames%30)return;SPVec3 p,f,u;if(!anchor(&p,&f,&u))return;if(!make(p,f,u)){end_world();failed=1;}return;}
     PTR camera=0;field_value(walker,camera_field,&camera);if(!camera||!su_alive(su_get(body)))return;
+    if(qp_lab_enabled){visual_profile_lab();return;}
+    if(qp_throw_enabled){qp_throw_lab(dt);return;}
     input_edges(walker);DWORD pid=0;window_pid(foreground(),&pid);int allow=pid==GetCurrentProcessId()&&boolean(focus,0,&ok)&&!boolean(blocked,walker,&ok)&&!boolean(typing,0,&ok)&&boolean(firstperson,walker,&ok)&&ok;
     if(allow&&test_tools)test_view(walker,camera);
     if(held){follow_held(camera,dt);
-        if(allow&&pressed(101))release(camera,0);else if(allow&&mouse(0))release(camera,1);else if(allow&&mouse(1)&&squeeze_timer<=0){qp_hit(&soft,(QPVector){1,0,0},3.5f);squeeze_timer=.4f;sound_event("squeeze");}
-    }else {
-        SPVec3 p=su_vector(rb_position,su_get(body)),v=su_vector(rb_get,su_get(body)),dv=su_sub(v,last_velocity);float impact=su_sqrt(su_dot(dv,dv));
-        if(impact>.30f&&qp_impact(&soft,qv(local_axis(su_normal(dv))),impact)){
-            impact_mesh_pending=impact>2.4f;sound_event(impact>2.4f?"impact-hard":"impact-soft");
+        if(allow&&pressed(101))release(camera,0);else if(allow&&mouse(0))release(camera,1);else if(allow&&mouse(1)&&squeeze_timer<=0){
+            /* A squeeze needs its own fresh readback; an earlier spawn/floor
+             * impact cannot qualify the held interaction in a private replay. */
+            if(qp_hit(&soft,(QPVector){1,0,0},3.5f))mesh_checked=0;
+            squeeze_timer=.4f;sound_event("squeeze");
         }
-        SPVec3 up=su_normal(su_sub(p,moon_center));v=su_add(v,su_mul(up,-1.62f*dt));float speed=su_sqrt(su_dot(v,v));if(speed>18)v=su_mul(v,18/speed);su_set_vector(rb_set,su_get(body),v);last_velocity=v;last_position=p;
+    }else {
+        if(!(qp_render_check&&qp_render_pose))free_physics(dt,0);
         if(allow&&pressed(101))pickup(walker,camera);
     }
     pickup_hint(walker,camera,allow);
@@ -334,7 +402,7 @@ __declspec(dllexport) int MoonLab_ModStart(PTR domain,PTR game){
 #undef M
     world_field=get_field(find_class("MoonCleaners","MoonWalker"),"world");camera_field=get_field(find_class("MoonCleaners","MoonWalker"),"viewCamera");hit_collider=su.hit_collider;
     PTR user=LoadLibraryA("user32.dll");key_state=(short(*)(int))GetProcAddress(user,"GetAsyncKeyState");foreground=(PTR(*)(void))GetProcAddress(user,"GetForegroundWindow");window_pid=(DWORD(*)(PTR,DWORD *))GetProcAddress(user,"GetWindowThreadProcessId");char test[8];test_tools=GetEnvironmentVariableA("MOONLAB_TEST_TOOLS",test,sizeof(test))==1&&test[0]=='1';
-    if(test_tools)qp_profile_bind();
+    if(test_tools){qp_profile_bind();qp_lab_enabled=GetEnvironmentVariableA("MOONLAB_PLUSH_PROFILE",test,sizeof(test))==1&&test[0]=='1';qp_throw_enabled=GetEnvironmentVariableA("MOONLAB_PLUSH_THROWS",test,sizeof(test))==1&&test[0]=='1';qp_render_check=GetEnvironmentVariableA("MOONLAB_PLUSH_RENDER_CHECK",test,sizeof(test))==1&&test[0]=='1';if(qp_lab_enabled+qp_throw_enabled+qp_render_check>1)return 0;}
     audio=ma_connect(domain,game);audio_preparation=ma_connect_preparation(domain,game);hands=mh_connect(domain,game);hints=qp_hints_connect(domain,game);if(!world_field||!camera_field||!key_state||!foreground||!window_pid||!audio||!audio_preparation||!hands||!hints||!audio->on_update)return 0;
     if(!qp_interactions_bind()){event("interaction-framework-unavailable");return 0;}if(!audio->on_update(tick))return 0;
     for(unsigned i=0;i<sizeof(sound_handles)/sizeof(*sound_handles);i++)if(qp_sound_bank[i].pcm){sound_handles[i]=audio->register_cue(qp_sound_bank+i);if(!sound_handles[i])return 0;}

@@ -1,9 +1,9 @@
 #ifndef QP_VISUAL_CANDIDATE_H
 #define QP_VISUAL_CANDIDATE_H
-/* Deliberately excluded from ordinary builds until the deferred accepted-feel
- * gates pass. This is not a runtime setting or consumer-facing service. */
+/* Qualified immutable visual renderer. Explicit comparison builds may select
+ * zero to retain the CPU mesh path; this is not a runtime user setting. */
 #ifndef QP_IMMUTABLE_VISUAL_CANDIDATE
-#define QP_IMMUTABLE_VISUAL_CANDIDATE 0
+#define QP_IMMUTABLE_VISUAL_CANDIDATE 1
 #endif
 #if QP_IMMUTABLE_VISUAL_CANDIDATE
 #include "visual_affine.h"
@@ -13,7 +13,9 @@ static PTR qp_visual_child(const char *name,PTR parent,SURoot *transform){
     if(!go||!tr){su_destroy(go);return 0;}
     void *args[]={parent,&keep_world};call(su.tr_parent,tr,args,&ok);
     if(!ok){su_destroy(go);return 0;}
-    *transform=su_hold(tr);return *transform?go:0;
+    *transform=su_hold(tr);
+    if(!*transform){su_destroy(go);return 0;}
+    return go;
 }
 static PTR qp_visual_make(PTR parent){
     if(!qp_visual_child("Plush contact basis",parent,&qp_visual_basis))return 0;
@@ -29,7 +31,8 @@ static int qp_visual_publish(const QPSoft *s){
     if(s->compression!=0){
         SPVec3 forward=su_v(p.forward.x,p.forward.y,p.forward.z),up=su_v(p.axis.x,p.axis.y,p.axis.z);
         void *args[]={&forward,&up};PTR boxed=call(su.look_rotation,0,args,&ok);
-        if(!ok||!boxed)return 0;su_copy(&q,unbox(boxed),sizeof(q));
+        if(!ok||!boxed)return 0;
+        su_copy(&q,unbox(boxed),sizeof(q));
     }
     SUQuat inverse={-q.x,-q.y,-q.z,q.w};
     SPVec3 offset=su_v(p.offset.x,p.offset.y,p.offset.z),scale=su_v(p.scale.x,p.scale.y,p.scale.z);
